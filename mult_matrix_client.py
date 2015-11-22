@@ -13,12 +13,12 @@ client = SoapClient(
 
 # call the remote method
 response = client.multiplyMatrix(
-    first_matrix=[1, 2, 3, 4, 5],
-    first_matrix_width=1,
-    first_matrix_height=1,
-    second_matrix=[1, 2, 99],
-    second_matrix_width=1,
-    second_matrix_height=1)
+    first_matrix=[1, 2, 3, 4, 5, 6, 7, 8, 9],
+    first_matrix_width=3,
+    first_matrix_height=3,
+    second_matrix=[10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24],
+    second_matrix_width=5,
+    second_matrix_height=3)
 
 l = []
 for i in range(1, len(response.result_matrix)):
