@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 
+import threading
+
 # from mpi4py import MPI
 
 # comm = MPI.COMM_WORLD
@@ -11,6 +13,39 @@ if rank == 0:
 
     from pysimplesoap.server import SoapDispatcher, SOAPHandler
     from BaseHTTPServer import HTTPServer
+
+    class TagGenerator:
+        """TagGenerator generates unique tags"""
+
+        def __init__(self):
+            self.tags = []
+            self.locker = threading.Lock()
+
+        def genTag(self):
+            """Generate new unused tag"""
+
+            self.locker.acquire()
+
+            # try to find free tag
+            for tag in xrange(len(self.tags)):
+                if tag not in self.tags:
+                    self.tags.append(tag)
+                    self.locker.release()
+                    return tag
+
+            # create new tag with max tag value
+            self.tags.append(len(self.tags))
+            self.locker.release()
+
+            return tag
+
+        def freeTag(self, tag):
+            if tag in self.tags:
+                self.locker.acquire()
+                self.tags.remove(tag)
+                self.locker.release()
+
+    tagGenerator = TagGenerator()
 
     def multiplyMatrix(first_matrix, first_matrix_width, first_matrix_height,
         second_matrix, second_matrix_width, second_matrix_height):
