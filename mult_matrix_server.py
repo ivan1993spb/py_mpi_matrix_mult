@@ -5,12 +5,14 @@ from mpi4py import MPI
 
 comm = MPI.COMM_WORLD
 rank = comm.Get_rank()
+size = comm.Get_size()
 
 if rank == 0:
     # starting soap server
 
     from pysimplesoap.server import SoapDispatcher, SOAPHandler
     from BaseHTTPServer import HTTPServer
+    import time
 
     class TagGenerator:
         """TagGenerator generates unique tags"""
@@ -46,21 +48,30 @@ if rank == 0:
 
     class ReceiverCounter:
 
-        def __init__(self):
-            # self.size = size
-            # self.counter = first
-            pass
+        def __init__(self, list):
+            # list of receivers
+            self.list = list
+            self.counter = 0
 
         def next(self):
-            return 1
+            next = self.list[self.counter]
+
+            self.counter += 1
+            if self.counter == len(self.list):
+                self.counter = 0
+
+            return next
 
     tagGenerator = TagGenerator()
-    recCounter = ReceiverCounter()
+    recCounter = ReceiverCounter(range(1, size))
+
 
     def multiplyMatrix(first_matrix, first_matrix_width, first_matrix_height,
         second_matrix, second_matrix_width, second_matrix_height):
         "multiply matrix"
-        
+
+        start_time = time.time()
+
         global tagGenerator, recCounter, comm
 
         if first_matrix_width != second_matrix_height:
@@ -92,7 +103,11 @@ if rank == 0:
         result_matrix = [0] * (first_matrix_height*second_matrix_width)
 
         for src, tag, i in srcTagsI:
+            print "receive from src %d tag %d" % (src, tag)
             result_matrix[i] = comm.recv(source=src, tag=tag)
+            tagGenerator.freeTag(tag)
+
+        print "%s seconds" % (time.time() - start_time)
 
         return {'result_matrix': result_matrix, 'result_matrix_width': second_matrix_width,
                                                 'result_matrix_height': first_matrix_height}
@@ -130,5 +145,8 @@ else:
         (row, col) = comm.recv(source=0, tag=MPI.ANY_TAG, status=status)
         tag = status.Get_tag()
 
+        print "[%d] receive task %d" % (rank, tag)
+
         t = threading.Thread(target=calcThread, args=(tag, row, col))
         t.start()
+
