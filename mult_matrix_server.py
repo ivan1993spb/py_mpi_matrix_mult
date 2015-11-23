@@ -2,6 +2,7 @@
 
 import threading
 from mpi4py import MPI
+import itertools
 
 comm = MPI.COMM_WORLD
 rank = comm.Get_rank()
@@ -70,19 +71,18 @@ if rank == 0:
         second_matrix, second_matrix_width, second_matrix_height):
         "multiply matrix"
 
-        print "received connection"
-
         start_time = time.time()
 
-        global tagGenerator, recCounter, comm
+        print "received connection"
 
         if first_matrix_width != second_matrix_height:
             raise ValueError('w != h')
 
-        i = 0
+        global tagGenerator, recCounter, comm
 
-        # [(src, tag, index of value), ...]
-        srcTagsI = []
+
+        tags = [0] * (first_matrix_height*second_matrix_width)
+        i = 0
 
         while i < first_matrix_height:
             j = 0
@@ -96,17 +96,19 @@ if rank == 0:
 
                 comm.send((row, col), dest=dest, tag=tag)
 
-                srcTagsI.append((dest, tag, i*second_matrix_width + j))
+                tags[i*second_matrix_width + j] = tag
+
                 j += 1
 
             i += 1
 
-        # empty list [0, 0, 0, ...]
         result_matrix = [0] * (first_matrix_height*second_matrix_width)
 
-        for src, tag, i in srcTagsI:
-            print "receive from src %d tag %d" % (src, tag)
-            result_matrix[i] = comm.recv(source=src, tag=tag)
+        status = MPI.Status()
+        for _ in itertools.repeat(None, first_matrix_height*second_matrix_width):
+            value = comm.recv(source=MPI.ANY_SOURCE, tag=MPI.ANY_TAG, status=status)
+            tag = status.Get_tag()
+            result_matrix[tags.index(tag)] = value
             tagGenerator.freeTag(tag)
 
         print "%s seconds" % (time.time() - start_time)
@@ -137,17 +139,17 @@ if rank == 0:
 
 else:
 
-    def calcThread(tag, row, col):
-        global comm
-        assert len(row) == len(col)
-        comm.send(sum([a*b for a, b in zip(row, col)]), dest=0, tag=tag)
+    def calcThread(comm):
+        status = MPI.Status()
 
-    status = MPI.Status()
-    while True:
-        (row, col) = comm.recv(source=0, tag=MPI.ANY_TAG, status=status)
-        tag = status.Get_tag()
+        while True:
+            (row, col) = comm.recv(source=0, tag=MPI.ANY_TAG, status=status)
+            assert len(row) == len(col)
+            tag = status.Get_tag()
 
-        print "[%d] receive task %d" % (rank, tag)
+            comm.send(sum([a*b for a, b in zip(row, col)]), dest=0, tag=tag)
 
-        t = threading.Thread(target=calcThread, args=(tag, row, col))
+
+    for _ in itertools.repeat(None, 1):
+        t = threading.Thread(target=calcThread, args=(comm,))
         t.start()
