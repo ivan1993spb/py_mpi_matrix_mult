@@ -70,6 +70,8 @@ if rank == 0:
         second_matrix, second_matrix_width, second_matrix_height):
         "multiply matrix"
 
+        print "received connection"
+
         start_time = time.time()
 
         global tagGenerator, recCounter, comm
@@ -96,7 +98,7 @@ if rank == 0:
 
                 srcTagsI.append((dest, tag, i*second_matrix_width + j))
                 j += 1
-            
+
             i += 1
 
         # empty list [0, 0, 0, ...]
@@ -149,4 +151,3 @@ else:
 
         t = threading.Thread(target=calcThread, args=(tag, row, col))
         t.start()
-
