@@ -1,153 +1,119 @@
 #!/usr/bin/env python
 
+import itertools
 import threading
+import multiprocessing
+import time
+
 from mpi4py import MPI
+from pysimplesoap.server import SoapDispatcher, SOAPHandler
+from BaseHTTPServer import HTTPServer
+
+CULC_THREAD_COUNT = multiprocessing.cpu_count()
 
 comm = MPI.COMM_WORLD
-rank = comm.Get_rank()
-size = comm.Get_size()
 
-if rank == 0:
-    # starting soap server
+RANK = comm.Get_rank()
+SIZE = comm.Get_size()
 
-    from pysimplesoap.server import SoapDispatcher, SOAPHandler
-    from BaseHTTPServer import HTTPServer
-    import time
+SERVER_PORT = int("8%03d" % RANK)
 
-    class TagGenerator:
-        """TagGenerator generates unique tags"""
-
-        def __init__(self):
-            self.tags = []
-            self.locker = threading.Lock()
-
-        def genTag(self):
-            """Generate unique tag"""
-
-            self.locker.acquire()
-
-            # try to find free tag
-            for tag in xrange(len(self.tags)):
-                if tag not in self.tags:
-                    self.tags.append(tag)
-                    self.locker.release()
-                    return tag
-
-            # create new tag with max tag value
-            tag = len(self.tags)
-            self.tags.append(tag)
-            self.locker.release()
-
-            return tag
-
-        def freeTag(self, tag):
-            if tag in self.tags:
-                self.locker.acquire()
-                self.tags.remove(tag)
-                self.locker.release()
-
-    class ReceiverCounter:
-
-        def __init__(self, list):
-            # list of receivers
-            self.list = list
-            self.counter = 0
-
-        def next(self):
-            next = self.list[self.counter]
-
-            self.counter += 1
-            if self.counter == len(self.list):
-                self.counter = 0
-
-            return next
-
-    tagGenerator = TagGenerator()
-    recCounter = ReceiverCounter(range(1, size))
-
-
-    def multiplyMatrix(first_matrix, first_matrix_width, first_matrix_height,
-        second_matrix, second_matrix_width, second_matrix_height):
-        "multiply matrix"
-
-        print "received connection"
-
-        start_time = time.time()
-
-        global tagGenerator, recCounter, comm
-
-        if first_matrix_width != second_matrix_height:
-            raise ValueError('w != h')
-
-        i = 0
-
-        # [(src, tag, index of value), ...]
-        srcTagsI = []
-
-        while i < first_matrix_height:
-            j = 0
-
-            while j < second_matrix_width:
-                row = first_matrix[i*first_matrix_width:i*first_matrix_width+first_matrix_width]
-                col = second_matrix[j::second_matrix_width]
-
-                tag = tagGenerator.genTag()
-                dest = recCounter.next()
-
-                comm.send((row, col), dest=dest, tag=tag)
-
-                srcTagsI.append((dest, tag, i*second_matrix_width + j))
-                j += 1
-
-            i += 1
-
-        # empty list [0, 0, 0, ...]
-        result_matrix = [0] * (first_matrix_height*second_matrix_width)
-
-        for src, tag, i in srcTagsI:
-            print "receive from src %d tag %d" % (src, tag)
-            result_matrix[i] = comm.recv(source=src, tag=tag)
-            tagGenerator.freeTag(tag)
-
-        print "%s seconds" % (time.time() - start_time)
-
-        return {'result_matrix': result_matrix, 'result_matrix_width': second_matrix_width,
-                                                'result_matrix_height': first_matrix_height}
-
-    dispatcher = SoapDispatcher(
-        'multiplyMatrix',
-        location = "http://localhost:8008/",
-        action   = 'http://localhost:8008/',
-        trace    = True,
-        ns       = True
-    )
-
-    dispatcher.register_function(
-        'multiplyMatrix',
-        multiplyMatrix,
-        returns = { 'result_matrix': [int], 'result_matrix_width': int, 'result_matrix_height': int},
-        args    = { 'first_matrix': [int], 'first_matrix_width': int, 'first_matrix_height': int,
-                    'second_matrix': [int], 'second_matrix_width': int, 'second_matrix_height': int}
-    )
-
-    httpd = HTTPServer(("", 8008), SOAPHandler)
-    httpd.dispatcher = dispatcher
-
-    httpd.serve_forever()
-
-else:
-
-    def calcThread(tag, row, col):
-        global comm
-        assert len(row) == len(col)
-        comm.send(sum([a*b for a, b in zip(row, col)]), dest=0, tag=tag)
-
+def calculatorThread(comm):
     status = MPI.Status()
+
     while True:
-        (row, col) = comm.recv(source=0, tag=MPI.ANY_TAG, status=status)
-        tag = status.Get_tag()
+        (row, col) = comm.recv(source=MPI.ANY_SOURCE, tag=MPI.ANY_TAG, status=status)
 
-        print "[%d] receive task %d" % (rank, tag)
+        if len(row) == len(col):
+            tag = status.Get_tag()
+            src = status.Get_source()
 
-        t = threading.Thread(target=calcThread, args=(tag, row, col))
-        t.start()
+            res = sum([a*b for a, b in zip(row, col)])
+
+            comm.send(res, dest=src, tag=tag)
+
+for _ in itertools.repeat(None, CULC_THREAD_COUNT):
+    threading.Thread(target=calculatorThread, args=(comm,)).start()
+
+NEXT_MPI_RECEIVER = RANK
+
+def getMPIDest():
+    global SIZE, NEXT_MPI_RECEIVER
+    next_receiver = NEXT_MPI_RECEIVER
+
+    if NEXT_MPI_RECEIVER+1 < SIZE:
+        NEXT_MPI_RECEIVER += 1
+    else:
+        NEXT_MPI_RECEIVER = 0
+
+    return next_receiver
+
+def sendTask(index, row, col):
+    # use index as message tag
+    comm.send((row, col), dest=getMPIDest(), tag=index)
+
+def sendMatrices(first_matrix, first_matrix_width, first_matrix_height,
+    second_matrix, second_matrix_width, second_matrix_height):
+    assert first_matrix_width == second_matrix_height
+    i = 0
+    while i < first_matrix_height:
+        j = 0
+        while j < second_matrix_width:
+            index = i*second_matrix_width + j
+            row = first_matrix[i*first_matrix_width:i*first_matrix_width+first_matrix_width]
+            col = second_matrix[j::second_matrix_width]
+            sendTask(index, row, col)
+            j += 1
+        i += 1
+
+def receiveResult():
+    status = MPI.Status()
+    res = comm.recv(source=MPI.ANY_SOURCE, tag=MPI.ANY_TAG, status=status)
+    # tag is index in matrix elem list
+    tag = status.Get_tag()
+    return tag, res # is index, value
+
+def multiplyMatrix(first_matrix, first_matrix_width, first_matrix_height,
+    second_matrix, second_matrix_width, second_matrix_height):
+
+    start_time = time.time()
+
+    print "accepted connection"
+
+    if first_matrix_width != second_matrix_height:
+        raise ValueError('w1 != h2')
+
+    threading.Thread(target=sendMatrices, args=(first_matrix, first_matrix_width, first_matrix_height,
+        second_matrix, second_matrix_width, second_matrix_height)).start()
+
+    result_matrix = [0] * (first_matrix_height*second_matrix_width)
+
+    for _ in itertools.repeat(None, len(result_matrix)):
+        index, res = receiveResult()
+        result_matrix[index] = res
+
+    print "%s seconds" % (time.time() - start_time)
+
+    return {'result_matrix': result_matrix, 'result_matrix_width': second_matrix_width,
+        'result_matrix_height': first_matrix_height}
+
+dispatcher = SoapDispatcher(
+    'multiplyMatrix',
+    location = "http://localhost:%d/" % SERVER_PORT,
+    action   = "http://localhost:%d/" % SERVER_PORT,
+    trace    = True,
+    ns       = True
+)
+
+dispatcher.register_function(
+    'multiplyMatrix',
+    multiplyMatrix,
+    returns = { 'result_matrix': [int], 'result_matrix_width': int, 'result_matrix_height': int },
+    args    = { 'first_matrix':  [int], 'first_matrix_width':  int, 'first_matrix_height':  int,
+                'second_matrix': [int], 'second_matrix_width': int, 'second_matrix_height': int }
+)
+
+httpd = HTTPServer(("", SERVER_PORT), SOAPHandler)
+httpd.dispatcher = dispatcher
+
+httpd.serve_forever()

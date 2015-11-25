@@ -4,8 +4,8 @@ from pysimplesoap.client import SoapClient, SoapFault
 
 # create a simple consumer
 client = SoapClient(
-    location = "http://localhost:8008/",
-    action = 'http://localhost:8008/',
+    location = "http://localhost:8000/",
+    action = 'http://localhost:8000/',
     soap_ns = 'soap',
     # trace = True,
     ns = False)
@@ -28,18 +28,18 @@ print int(response.result_matrix_width)
 print int(response.result_matrix_height)
 
 
-response = client.multiplyMatrix(
-    first_matrix=range(0, 900),
-    first_matrix_width=30,
-    first_matrix_height=30,
-    second_matrix=range(0, 900),
-    second_matrix_width=30,
-    second_matrix_height=30)
+# response = client.multiplyMatrix(
+#     first_matrix=range(0, 900),
+#     first_matrix_width=30,
+#     first_matrix_height=30,
+#     second_matrix=range(0, 900),
+#     second_matrix_width=30,
+#     second_matrix_height=30)
 
-l = []
-for i in range(1, len(response.result_matrix)):
-    l.append(int(response.result_matrix[i]))
-print l
+# l = []
+# for i in range(1, len(response.result_matrix)):
+#     l.append(int(response.result_matrix[i]))
+# print l
 
-print int(response.result_matrix_width)
-print int(response.result_matrix_height)
+# print int(response.result_matrix_width)
+# print int(response.result_matrix_height)
