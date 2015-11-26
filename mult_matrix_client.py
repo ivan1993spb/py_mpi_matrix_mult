@@ -29,12 +29,12 @@ print int(response.result_matrix_height)
 
 
 # response = client.multiplyMatrix(
-#     first_matrix=range(0, 900),
-#     first_matrix_width=30,
-#     first_matrix_height=30,
-#     second_matrix=range(0, 900),
-#     second_matrix_width=30,
-#     second_matrix_height=30)
+#     first_matrix=range(0, 400),
+#     first_matrix_width=20,
+#     first_matrix_height=20,
+#     second_matrix=range(0, 400),
+#     second_matrix_width=20,
+#     second_matrix_height=20)
 
 # l = []
 # for i in range(1, len(response.result_matrix)):

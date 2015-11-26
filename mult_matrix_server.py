@@ -16,13 +16,18 @@ comm = MPI.COMM_WORLD
 RANK = comm.Get_rank()
 SIZE = comm.Get_size()
 
+taskComm = comm.Split(0, RANK)
+resComm = comm.Split(1, RANK)
+
 SERVER_PORT = int("8%03d" % RANK)
 
-def calculatorThread(comm):
+def calculatorThread():
+    global taskComm, resComm
+
     status = MPI.Status()
 
     while True:
-        (row, col) = comm.recv(source=MPI.ANY_SOURCE, tag=MPI.ANY_TAG, status=status)
+        (row, col) = taskComm.recv(source=MPI.ANY_SOURCE, tag=MPI.ANY_TAG, status=status)
 
         if len(row) == len(col):
             tag = status.Get_tag()
@@ -30,10 +35,10 @@ def calculatorThread(comm):
 
             res = sum([a*b for a, b in zip(row, col)])
 
-            comm.send(res, dest=src, tag=tag)
+            resComm.send(res, dest=src, tag=tag)
 
 for _ in itertools.repeat(None, CULC_THREAD_COUNT):
-    threading.Thread(target=calculatorThread, args=(comm,)).start()
+    threading.Thread(target=calculatorThread).start()
 
 NEXT_MPI_RECEIVER = RANK
 
@@ -49,8 +54,9 @@ def getMPIDest():
     return next_receiver
 
 def sendTask(index, row, col):
+    global taskComm
     # use index as message tag
-    comm.send((row, col), dest=getMPIDest(), tag=index)
+    taskComm.send((row, col), dest=getMPIDest(), tag=index)
 
 def sendMatrices(first_matrix, first_matrix_width, first_matrix_height,
     second_matrix, second_matrix_width, second_matrix_height):
@@ -67,8 +73,9 @@ def sendMatrices(first_matrix, first_matrix_width, first_matrix_height,
         i += 1
 
 def receiveResult():
+    global resComm
     status = MPI.Status()
-    res = comm.recv(source=MPI.ANY_SOURCE, tag=MPI.ANY_TAG, status=status)
+    res = resComm.recv(source=MPI.ANY_SOURCE, tag=MPI.ANY_TAG, status=status)
     # tag is index in matrix elem list
     tag = status.Get_tag()
     return tag, res # is index, value
